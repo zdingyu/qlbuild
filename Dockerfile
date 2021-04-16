@@ -1,53 +1,55 @@
-FROM node:lts-alpine
-LABEL maintainer="whyour"
-ARG JD_BASE_URL=https://github.com.cnpmjs.org/whyour/qinglong
-ARG JD_BASE_BRANCH=master
-ARG JD_SCRIPTS_URL=https://github.com.cnpmjs.org/RikudouPatrickstar/jd_scripts
-ARG JD_SCRIPTS_BRANCH=master
-ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-    LANG=zh_CN.UTF-8 \
-    SHELL=/bin/bash \
-    PS1="\u@\h:\w \$ " \
-    JD_DIR=/jd
-RUN apk update -f \
-    && apk upgrade \
-    && apk --no-cache add -f bash \
-                             coreutils \
-                             moreutils \
-                             git \
-                             wget \
-                             curl \
-                             nano \
-                             tzdata \
-                             perl \
-                             openssl \
-                             nginx \
-                             python \
-                             make \
-                             g++ \
-                             yarn \
-    && rm -rf /var/cache/apk/* \
-    && ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
-    && echo "Asia/Shanghai" > /etc/timezone \
-    && touch ~/.bashrc \
-    && mkdir /run/nginx \
-    && git clone -b ${JD_BASE_BRANCH} ${JD_BASE_URL} ${JD_DIR} \
-    && cd ${JD_DIR} \
-    && cp -f .env.example .env \
-    && ln -sf ${JD_DIR}/shell/jd.sh /usr/local/bin/jd \
-    && ln -sf ${JD_DIR}/shell/git_pull.sh /usr/local/bin/git_pull \
-    && ln -sf ${JD_DIR}/shell/rm_log.sh /usr/local/bin/rm_log \
-    && ln -sf ${JD_DIR}/shell/export_sharecodes.sh /usr/local/bin/export_sharecodes \
-    && ln -sf ${JD_DIR}/shell/git_diy.sh /usr/local/bin/diy \
-    && ln -sf ${JD_DIR}/shell/notify.sh /usr/local/bin/notify \
-    && yarn install \
-    && yarn build \
-    && yarn build-back \
-    && yarn install --production \
-    && git clone -b ${JD_SCRIPTS_BRANCH} ${JD_SCRIPTS_URL} ${JD_DIR}/scripts \
-    && cd ${JD_DIR}/scripts \
-    && npm install --production\
-    && npm install -g pm2 \
-    && rm -rf /root/.npm
-WORKDIR ${JD_DIR}
-ENTRYPOINT bash ${JD_DIR}/docker/docker-entrypoint.sh
+FROM python:3.7.4-slim as base
+
+# Create app directory
+WORKDIR /app
+
+# Install app dependencies
+COPY ./docker/sources.list .
+
+RUN mv /etc/apt/sources.list /etc/apt/sources.list.bak && mv ./sources.list /etc/apt/
+
+RUN apt-get -o Acquire::Check-Valid-Until=false update \
+    && apt-get install \
+    --no-install-recommends --yes \
+    build-essential libpq-dev cron git \
+    python3-dev --yes
+
+FROM base as build
+
+COPY requirements.txt .
+
+RUN mkdir /install
+
+RUN pip download --destination-directory /install -r /app/requirements.txt -i https://pypi.douban.com/simple
+
+FROM python:3.7.4-slim  as release
+
+COPY ./docker/sources.list .
+
+RUN mv /etc/apt/sources.list /etc/apt/sources.list.bak && mv ./sources.list /etc/apt/
+
+RUN apt-get update && apt-get -y install cron git
+
+WORKDIR /app
+
+COPY --from=build /install /install
+
+COPY requirements.txt .
+
+RUN pip install --no-index --find-links=/install -r requirements.txt
+
+RUN mkdir /app/docker
+
+COPY docker/entry.sh /app/docker/
+
+RUN touch /var/log/bustag.log
+
+RUN rm -rf /install &&  rm -rf /root/.cache/pip
+
+RUN chmod 755 /app/docker/*.sh
+
+EXPOSE 8000
+
+LABEL maintainer="gxtrobot <gxtrobot@gmail.com>"
+
+CMD ["/app/docker/entry.sh"]
