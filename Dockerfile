@@ -20,7 +20,7 @@ COPY requirements.txt .
 
 RUN mkdir /install
 
-RUN pip download --destination-directory /install -r /app/requirements.txt -i https://pypi.doubanio.com/simple
+RUN pip download --destination-directory /install -r /app/requirements.txt
 
 FROM python:3.7.4-slim  as release
 
